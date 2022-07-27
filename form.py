@@ -1,13 +1,12 @@
 import numpy as np
-import cv2
 import copy
 import os
 import csv
 import datetime
+import cv2
 
 import getopt
 import sys
-
 
 # from socket import socket, AF_INET, SOCK_DGRAM
 # def send_msg(msg):
