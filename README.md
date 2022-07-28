@@ -1,4 +1,6 @@
 # Simple Questionnaire Form
+![Demo](demo.gif)
+
 ## Requirement
 - Python 3.x
 - opencv-python

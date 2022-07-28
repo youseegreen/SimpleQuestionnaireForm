@@ -145,7 +145,7 @@ class Form:
         self.img = cv2.resize(self.img, (self.form_width, self.form_height))
         self.window_name = window_name
         cv2.namedWindow(self.window_name)
-        cv2.moveWindow(self.window_name, 0, 0)
+        cv2.moveWindow(self.window_name, 100, 100)
 
         # 画面に条件数を書く
         # 条件の枠を消す
