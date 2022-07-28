@@ -1,3 +1,4 @@
+from traceback import format_exception_only
 import numpy as np
 import copy
 import os
@@ -8,19 +9,25 @@ import cv2
 import getopt
 import sys
 
-# from socket import socket, AF_INET, SOCK_DGRAM
-# def send_msg(msg):
-#     s = socket(AF_INET, SOCK_DGRAM) # 通信する場合
-#     s.sendto(msg.encode(), ("100.80.145.215", 52525))
-#     s.close()
-
 
 usage = '''form.py usage:
 
 python form.py <options>
-        --user=<number>  1~
-        --trial=<number>  (default : 0)
+        --user=<number> / -u <number> : 参加者番号 1~
+        --trial_num=<number> / -t <number> : 全試行数
+        --start=<number> / -s <number> : startする試行番号 (default : 1)
+        --gain=<float> / -g <float> : フォームのサイズ（default : 1）
+        --zmean=<0 or 1> / -z <0 or 1> : 7段階尺度を(0)0～6にするか(1)-3～3にするか（default : 1）
+        --debug / -d : シートパラメータの設定
 '''
+
+f_resource = "./resources/"
+conf_filename = f_resource + "form_conf.csv"
+sheet_filename = f_resource + "sheet.png"
+f_result = "./result/"
+result_prename = f_result + "result"
+result_etcname = ".csv"
+
 
 ##################################
 ## sheet parameter
@@ -77,7 +84,6 @@ class Button:
                     (self.cx + self.marginx, self.cy + self.marginy), color, thickness=-1)
 
 
-
 # グループボタン、どれか一個しかONにならない
 class RadioButton:
     # buttons : class Button
@@ -113,75 +119,24 @@ class RadioButton:
         for b in self.buttons:
             b.RenderMarginArea(target_img, color)
 
-# 二次元マップ
-class Map:
-    def __init__(self, center_x, center_y, width, height, margin_gain=1.0):
-        self.cx = center_x
-        self.cy = center_y
-        self.minx = (int)(center_x - width / 2 + 0.5)
-        self.maxx = (int)(center_x + width / 2 + 0.5)
-        self.miny = (int)(center_y - height / 2 + 0.5)
-        self.maxy = (int)(center_y + height / 2 + 0.5)
-        self.state = False
-        # ボタン中心からどれだけ離れた範囲をクリック領域とみなすか
-        self.margin_gain = margin_gain
-        self.marginx = (int)(width / 2 * self.margin_gain + 0.5) 
-        self.marginy = (int)(height / 2 * self.margin_gain + 0.5)
-        self.posX = None
-        self.posY = None
-    
-    # 戻り値：ステータス変更！
-    def UpdateState(self, x, y):
-        if not self.IsClick(x, y):
-            return False 
-        self.posX = self.maxx if x > self.maxx else self.minx if x < self.minx else x
-        self.posY = self.maxy if y > self.maxy else self.miny if y < self.miny else y
-        return True
-    
-    def IsClick(self, x, y):
-        if x < self.cx - self.marginx or x > self.cx + self.marginx or y < self.cy - self.marginy or y > self.cy + self.marginy:
-            return False
-        else:
-            return True
-
-    def Render(self, target_img, color = (0, 0, 255), point_size = 5):
-        if self.posX == None or self.posY == None:
-            return 
-        cv2.circle(target_img, (self.posX, self.posY), point_size, color, thickness=-1)
-
-    def RenderMarginArea(self, target_img, color = (0, 255, 255)):
-        cv2.rectangle(target_img, (self.cx - self.marginx, self.cy - self.marginy), 
-                    (self.cx + self.marginx, self.cy + self.marginy), color, thickness=-1)
-
-    # -1 ~ 1, -1 ~ 1で返す
-    def State(self):
-        if self.posX == None or self.posY == None:
-            return (None, None)
-        xvalue = -1 + 2 * (self.posX - self.minx) / (self.maxx - self.minx)
-        yvalue = -1 * (-1 + 2 * (self.posY - self.miny) / (self.maxy - self.miny))
-        return (xvalue, yvalue)
-
-
-
-
 
 # フォーム
 class Form:
-    def __init__(self, back_img, window_name, trial_num, size=1.5):
+    def __init__(self, back_img, window_name, trial_num, size=1.0):
         f = lambda a:(int)(a * size + 0.5)
 
-        if not os.path.isfile("./resources/form_conf.csv"):
-            print("resources/form_conf.csvがありません")
+        if not os.path.isfile(conf_filename):
+            print(f"{conf_filename}がありません")
             sys.exit()
-        with open("./resources/form_conf.csv", "r") as z:
+        with open(conf_filename, "r") as z:
             reader = csv.reader(z)
             dummy = [row for row in reader]
             imgw = (int)(dummy[0][0])
             imgh = (int)(dummy[0][1])
-            t = {"x":(int)(dummy[1][0]), "y":(int)(dummy[1][1]), "w":(int)(dummy[1][2]), "h":(int)(dummy[1][3])}
-            p = {"x":(int)(dummy[2][0]), "y":(int)(dummy[2][1]), "w":(int)(dummy[2][2]), "h":(int)(dummy[2][3])}
-            n = {"x":(int)(dummy[3][0]), "y":(int)(dummy[3][1]), "w":(int)(dummy[3][2]), "h":(int)(dummy[3][3])}
-            g = [{"x1":(int)(row[0]), "x2":(int)(row[1]), "y":(int)(row[2]), "w":(int)(row[3]), "h":(int)(row[4])} for row in dummy[4:]]
+            t = {"l":(int)(dummy[1][0]), "t":(int)(dummy[1][1]), "r":(int)(dummy[1][2]), "b":(int)(dummy[1][3])}
+            p = {"cx":(int)(dummy[2][0]), "cy":(int)(dummy[2][1]), "w":(int)(dummy[2][2]), "h":(int)(dummy[2][3])}
+            n = {"cx":(int)(dummy[3][0]), "cy":(int)(dummy[3][1]), "w":(int)(dummy[3][2]), "h":(int)(dummy[3][3])}
+            g = [{"cx1":(int)(row[0]), "cx2":(int)(row[1]), "cy":(int)(row[2]), "w":(int)(row[3]), "h":(int)(row[4]), "n":(int)(row[5])} for row in dummy[4:]]
 
         self.form_width = f(imgw)
         self.form_height = f(imgh)
@@ -191,62 +146,35 @@ class Form:
         self.window_name = window_name
         cv2.namedWindow(self.window_name)
         cv2.moveWindow(self.window_name, 0, 0)
-        self.trial_num = trial_num
-        cv2.rectangle(self.img, (f(t['x']) - 2, f(t['y'] - t['h'] / 2) - 2), (f(t['x'] + t['w']) + 2, f(t['y'] + t['h'] / 2) + 2), (255, 255, 255), -1)
-        cv2.putText(self.img, "Trial : " + str(trial_num + 1), (f(t['x']), f(t['y'])), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 0), 3)
+
+        # 画面に条件数を書く
+        # 条件の枠を消す
+        cv2.rectangle(self.img, (f(t['l']), f(t['t'])), (f(t['r']) + 2, f(t['b']) + 2), (255, 255, 255), -1)
+        # 数字を描画
+        fsize = f(t['b'] - t['t']) / 24
+        (w, h), base = cv2.getTextSize(str(trial_num), cv2.FONT_HERSHEY_SIMPLEX, fsize, 2)
+        cv2.putText(self.img, str(trial_num), (f(t['l']), f(t['t']) + h), cv2.FONT_HERSHEY_SIMPLEX, fsize, (0, 0, 0), 2)
+
+        # Prevボタン
+        self.prev_button = Button(f(p['cx']), f(p['cy']), f(p['w']), f(p['h']), "prev")
+        # Nextボタン
+        self.next_button = Button(f(n['cx']), f(n['cy']), f(n['w']), f(n['h']), "next")
 
         self.all_questions = []
         idx = 0
-
-        # Question1
-        buttons_num = 7
-        buttons_width = f(g[idx]["w"])  
-        buttons_height = f(g[idx]["h"])    
-        q2_yc = f(g[idx]["y"])          
-        q2_xmin = f(g[idx]["x1"])
-        q2_xmax = f(g[idx]["x2"]) 
-        q2_xcs = [int(q2_xmin + i * (q2_xmax - q2_xmin) / (buttons_num - 1) + 0.5) for i in range(buttons_num)]
-        buttons = []
-        for i in range(buttons_num):
-            buttons.append(Button(q2_xcs[i], q2_yc, buttons_width, buttons_height, margin_gain=2.4))
-        self.question1 = RadioButton(buttons)
-        idx += 1
-        self.all_questions.append(self.question1)
-
-        # Question2
-        buttons_num = 7
-        buttons_width = f(g[idx]["w"]) 
-        buttons_height = f(g[idx]["h"]) 
-        q2_yc = f(g[idx]["y"]) 
-        q2_xmin = f(g[idx]["x1"]) 
-        q2_xmax = f(g[idx]["x2"]) 
-        q2_xcs = [int(q2_xmin + i * (q2_xmax - q2_xmin) / (buttons_num - 1) + 0.5) for i in range(buttons_num)]
-        buttons = []
-        for i in range(buttons_num):
-            buttons.append(Button(q2_xcs[i], q2_yc, buttons_width, buttons_height, margin_gain=2.4))
-        self.question2 = RadioButton(buttons)
-        idx += 1
-        self.all_questions.append(self.question2)
-
-        # # # Question3
-        # buttons_num = 7
-        # buttons_width = f(g[idx]["w"]) 
-        # buttons_height = f(g[idx]["h"]) 
-        # q2_yc = f(g[idx]["y"])
-        # q2_xmin = f(g[idx]["x1"]) 
-        # q2_xmax = f(g[idx]["x2"]) 
-        # q2_xcs = [int(q2_xmin + i * (q2_xmax - q2_xmin) / (buttons_num - 1) + 0.5) for i in range(buttons_num)]
-        # buttons = []
-        # for i in range(buttons_num):
-        #     buttons.append(Button(q2_xcs[i], q2_yc, buttons_width, buttons_height, margin_gain=2.4))
-        # self.question3 = RadioButton(buttons)
-        # idx += 1
-        # self.all_questions.append(self.question3)
-
-        # Prev
-        self.prev_button = Button(f(p['x']), f(p['y']), f(p['w']), f(p['h']), "prev")
-        # Next
-        self.next_button = Button(f(n['x']), f(n['y']), f(n['w']), f(n['h']), "next")
+        for idx in range(len(g)):
+            # Question idx+1
+            buttons_num = g[idx]["n"]   # ボタンの数
+            buttons_width = f(g[idx]["w"])
+            buttons_height = f(g[idx]["h"])    
+            q_yc = f(g[idx]["cy"])          
+            q_xmin = f(g[idx]["cx1"])
+            q_xmax = f(g[idx]["cx2"]) 
+            q_xcs = [int(q_xmin + i * (q_xmax - q_xmin) / (buttons_num - 1) + 0.5) for i in range(buttons_num)]
+            buttons = []
+            for i in range(buttons_num):
+                buttons.append(Button(q_xcs[i], q_yc, buttons_width, buttons_height, margin_gain=2.4))
+            self.all_questions.append(RadioButton(buttons))
 
     def Update(self, x, y):
         can_push_next = True
@@ -279,11 +207,12 @@ class Form:
     def IsGotoNextState(self):
         return self.next_button.State()
     
-    def GetData(self):
+    def GetData(self, is_normalize = True):
         row = {}
         for i, question in enumerate(self.all_questions):
-            row[f'q{i+1}'] = question.State()
-        return row
+            bias = 0 if not is_normalize else (int)((question.num - 1) / 2 + 0.5)
+            row[f'q{i+1}'] = question.State() - bias
+        return row, len(self.all_questions)
 
     def SetMouseEvent(self, func):
         # マウスイベント時に関数mouse_touch_flagの処理を行う
@@ -308,178 +237,200 @@ def __mouse_event(event, x, y, flag, params):
         _touch_flag = True
 
 
-def LoadConditionFile(file_name):
-    i2j = []
-    with open(file_name, 'r', newline='') as f:
-        reader = csv.reader(f)
-        dummy = [row for row in reader]
+def __find_nearest_black_pixel(img, cx, cy, ret_type, margin):
+    top = cy
+    bot = cy
+    left = cx
+    right = cx
+    while img[top,cx, 0] > 250:
+        top -= 1
+    top = top - margin
+    while img[bot, cx, 0] > 250:
+        bot += 1
+    bot = bot + margin
+    while img[cy, left, 0] > 250:
+        left -= 1
+    left = left - margin
+    while img[cy, right, 0] > 250:
+        right += 1
+    right = right + margin
+    if ret_type == "lrtb":
+        return left, right, top, bot
+    if ret_type == "cxcywh":
+        wid = right - left
+        hei = bot - top
+        return (int)(left + wid / 2 + 0.5), (int)(top + hei / 2 + 0.5), wid, hei
 
-        for d in dummy[1:]:
-            row = {'trial':(int)(d[0]), 'Factor1':d[1], 'Factor2':d[2]}
-            i2j.append(row)
-    print(i2j)
-    return i2j
-
+# (x1,y)から(x2,y)までの横プロファイルで、黒線が何本あるかを導出し、ボタンの数を計算する
+def __calculate_button_num(img, x1, x2, y, margin):
+    x = x1
+    black_line_num = 0
+    while x < x2:
+        # 白画素の場合
+        if img[y, x, 0] > 250:
+            x += 1
+        # 黒画素の場合
+        else:
+            black_line_num += 1
+            x += margin + 1  # margin分だけ先を見る
+    return (int)(black_line_num / 2) + 1   # ボタンの数
 
 def FindFormParameter():
     global _x
     global _y
     global _touch_flag
-    sheet_name = './resources/sheet.png'
-    img = cv2.imread(sheet_name)
-    cv2.namedWindow("debug")
-    cv2.moveWindow("debug", 0, 0)
-#    cv2.imshow("debug", img)
-    cv2.setMouseCallback("debug", __mouse_event)
-
-    print("1. title area\n2. prev_button\n3. next_button\n4. question1...")
-
+    img = cv2.imread(sheet_filename)
     width = img.shape[1]
     height = img.shape[0]
-    thx = 20
-    thy = 20
+
+    # 終了ボタンの描画
+    thx = 25
+    thy = 25
     cv2.rectangle(img, (0, 0), (thx, thy), (255, 255, 0))
-    cands = [[-1, -1]]
 
-    while True:
-        bar_img = img.copy()
-        cv2.circle(bar_img, (_x, _y), 5, (0, 255, 0), -1)
-        cv2.imshow("debug", bar_img)
-        if _touch_flag:
-            if _x < thx and _y < thy:
+
+    click_infos = []    # クリックした情報を格納する場所
+    q = 1   # 質問番号
+    exit_flag = False
+    while not exit_flag:
+        enable_exit = False   # To exitが有効かどうか
+        i = len(click_infos)
+        if i == 0:
+            window_name = "Click the area that shows 'trial_number'"
+        elif i == 1:
+            window_name = "Click 'prev button area'"
+        elif i == 2:
+            window_name = "Click 'next button area'"
+        elif ((i - 3) % 2) == 0:
+            window_name = f"Click Q{q}'s leftest button. [To exit] Click the skybox in the upper left."
+            enable_exit = True
+        else:
+            window_name = f"Click Q{q}'s rightest button."
+
+        cv2.namedWindow(window_name)
+        cv2.namedWindow(window_name)
+        cv2.moveWindow(window_name, 0, 0)
+        cv2.setMouseCallback(window_name, __mouse_event)
+        while True:
+            bar_img = img.copy()
+            cv2.circle(bar_img, (_x, _y), 5, (0, 255, 0), -1)
+            cv2.imshow(window_name, bar_img)
+            if _touch_flag:
+                if _x < thx and _y < thy and enable_exit:
+                    exit_flag = True
+                    break
+                click_infos.append([_x, _y])
+                cv2.circle(img, (_x, _y), 5, (0, 0, 255), -1)
+                _touch_flag = False
                 break
-            cands.append([_x, _y])
-            cv2.circle(img, (_x, _y), 5, (0, 0, 255), -1)
-            _touch_flag = False
-        cv2.waitKey(5)
-    cv2.destroyWindow("debug")
+            cv2.waitKey(5)
+        cv2.destroyWindow(window_name)
 
-    row = []
-    title_area = []
-    p_n_button = []
-    img = cv2.imread(sheet_name)
-    for i in range(0, len(cands), 2):
+    if len(click_infos) < 5 or len(click_infos) % 2 == 0:
+        print("clicks is something wrong")
+        return 
+
+    # クリックした情報からデコードする        
+    img = cv2.imread(sheet_filename)
+
+    margin = 3
+
+    # 番号を描画するエリア
+    x, y = click_infos[0]
+    left, right, top, bot = __find_nearest_black_pixel(img, x, y, "lrtb", margin)
+    title_area = [left, top, right, bot]
+
+    # prevボタンを描画するエリア
+    x, y = click_infos[1]
+    cx, cy, wid, hei = __find_nearest_black_pixel(img, x, y, "cxcywh", margin)
+    prev_area = [cx, cy, wid, hei]
+
+    # nextボタンを描画するエリア
+    x, y = click_infos[2]
+    cx, cy, wid, hei = __find_nearest_black_pixel(img, x, y, "cxcywh", margin)
+    next_area = [cx, cy, wid, hei]
+
+    click_infos = click_infos[3:]  # 使ったものはremove
+    button_area = []
+    for i in range(0, len(click_infos), 2):
         for j in range(2):
-            p = cands[i + j]
-            top = p[1]
-            bot = p[1]
-            left = p[0]
-            right = p[0]
-            while img[top, p[0], 0] > 250:
-                top -= 1
-            while img[bot, p[0], 0] > 250:
-                bot += 1
-            while img[p[1], left, 0] > 250:
-                left -= 1
-            while img[p[1], right, 0] > 250:
-                right += 1
-            box_width = right - left
-            box_height = bot - top
-            if i == 0:
-                if j == 1:
-                    title_area.append([(int)(left), (int)(top + box_height / 2 + 0.5), box_width + 4, box_height + 4, -1])
+            x, y = click_infos[i + j]
+            cx, cy, wid, hei = __find_nearest_black_pixel(img, x, y, "cxcywh", margin)
+            if j == 0:  # 左端ボタンの場合は記録して右端ボタンに移る
+                box_cx1 = cx
                 continue
-            if i == 2:
-                p_n_button.append([(int)(left + box_width / 2 + 0.5), (int)(top + box_height / 2 + 0.5), box_width + 4, box_height + 4, -1])
-                continue
-            if j == 0:
-                box_cx1 = (int)(left + box_width / 2 + 0.5)
-            else:
-                box_cx2 = (int)(left + box_width / 2 + 0.5)
-                box_cy2 = (int)(top + box_height / 2 + 0.5)
-                row.append([box_cx1, box_cx2, box_cy2, box_width + 4, box_height + 4])
-    
+            # box1cxからbox2cxまで黒線が何本あるかカウントして、ボタンの数を導出する
+            num = __calculate_button_num(img, box_cx1, cx, cy, margin)
+            button_area.append([box_cx1, cx, cy, wid, hei, num])
 
-    with open("./resources/form_conf.csv", "w", newline='') as f:
+    with open(conf_filename, "w", newline='') as f:
         writer = csv.writer(f)
-        writer.writerow([width, height, 0, 0, 0])
-        writer.writerow(title_area[0])
-        writer.writerow(p_n_button[0])
-        writer.writerow(p_n_button[1])
-        writer.writerows(row)
+        writer.writerow([width, height])
+        writer.writerow(title_area)
+        writer.writerow(prev_area)
+        writer.writerow(next_area)
+        writer.writerows(button_area)
 
 
-
-
-
-def Play(subject_num, start_num = 0):
+def Play(subject_num, trial_num, start_num = 1, size=1.0, zero_mean = True):
     global _x
     global _y
     global _touch_flag
 
-    header = ["trial", "Factor1", "Factor2", "q1", "q2", "time"]
+    print('参加者：{}人目、試行回数：{}回、{}試行目からスタート'.format(subject_num, trial_num, start_num))
 
-    conds = copy.deepcopy(LoadConditionFile('conditions/subject{}.csv'.format(subject_num)))
-    trial_num = len(conds)  #.shape[0]    
-    print('参加者：{}人目、試行回数：{}回、{}試行目からスタート'.format(subject_num, trial_num, start_num + 1))
+    window_name = 'Questionnaire Form'
+    img = cv2.imread(sheet_filename)
+
     t = start_num
 
-    img = cv2.imread('./resources/sheet.png')
-    window_name = 'target'
-    res = []
+    while t <= trial_num:
 
-
-    while t < trial_num:
-        form = Form(img, window_name, t, size=0.9)
+        form = Form(img, window_name, t, size)
         form.SetMouseEvent(__mouse_event)
 
         while not form.IsGotoNextState() and not form.IsGotoPrevState():
             if _touch_flag:
                 form.Update(_x, _y)
                 _touch_flag = False
-            ans = form.RenderAll(_x, _y)
-
-            # if ans == 49:
-            #     send_msg(f"a,o,1,end")
-            # elif ans == 50:
-            #     send_msg(f"a,o,2,end")
+            form.RenderAll(_x, _y)
 
         cv2.destroyAllWindows()
 
         # 前に戻るボタンがONならこの試行の結果を無視して前に戻る
         if form.IsGotoPrevState():
-            if t != 0:
-                t += -1
-            # send_msg(f"a,n,{t + 1},end")
+            t = (t - 1) if t != 0 else t
             cv2.waitKey(500)
             continue
 
-        _data = form.GetData()
-
+        _data, _qnum = form.GetData(zero_mean)
         dt = datetime.datetime.now()
-        record = [t, conds[t]['Factor1'], conds[t]['Factor2'], \
-            _data['q1'] - 3, _data['q2'] - 3, dt]
-        res.append(record)
 
-        if not os.path.isfile('result/result_tmp{}.csv'.format(subject_num)):
-            with open('result/result_tmp{}.csv'.format(subject_num), 'a', newline='') as f:
+        record = [t] + [_data[f'q{i+1}'] for i in range(_qnum)] + [dt]
+
+        save_filename = result_prename + str(subject_num) + result_etcname
+        if not os.path.isfile(save_filename):
+            with open(save_filename, 'a', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(header)
-        with open('result/result_tmp{}.csv'.format(subject_num), 'a', newline='') as f:
+                writer.writerow(['trial'] + [f'q{i+1}' for i in range(_qnum)] + ['time_stamp'])
+        with open(save_filename, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(record)
 
-        # 結果を送信する
-        # send_msg(f"a,n,{t+2},end")
-
-        ###########################
         cv2.waitKey(500)
         t += 1        
-
-    # with open('result/result{}.csv'.format(subject_num), 'w', newline='') as f:
-    #     writer = csv.writer(f)
-    #     writer.writerow(header)
-    #     writer.writerows(res)
-
 
 
 if __name__ == '__main__':
     argv = sys.argv[1:]
     subject_num = None
-    trial_num = 0
+    trial_num = None
+    start_num = 1
+    size_gain = 1.0
+    zero_mean = True
 
     try:
-        opts, args = getopt.getopt(argv, 'h:u:t:d:', ['help', 'user=', 'trial=', 'debug'])
+        opts, args = getopt.getopt(argv, 'h:u:t:s:g:z:d', ['help', 'user=', 'trial=', 'start=', 'gain=', 'zmean=', 'debug'])
     except getopt.GetoptError:
         print(usage)
         sys.exit()
@@ -495,9 +446,15 @@ if __name__ == '__main__':
                 subject_num = int(arg)
             elif opt in ('-t', '--trial'):
                 trial_num = int(arg)
-                if trial_num < 0:
+            elif opt in ('-g', '--gain'):
+                size_gain = float(arg)
+            elif opt in ('-s', '--start'):
+                start_num = int(arg)
+                if start_num <= 0:
                     print(usage)
                     sys.exit()
+            elif opt in ('-z', '--zmean'):
+                zero_mean = True if int(arg) != 0 else False
         except Exception:
             print('Error parsing argument: %s' % opt)
             print(usage)
@@ -505,4 +462,4 @@ if __name__ == '__main__':
     if subject_num == None or subject_num <= 0:
         print(usage)
         sys.exit()
-    Play(subject_num, trial_num)
+    Play(subject_num, trial_num, start_num, size_gain, zero_mean)
